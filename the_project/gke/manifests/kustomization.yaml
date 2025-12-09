@@ -1,46 +1,56 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources:
-  - ../../manifests/namespace.yaml
-  - ../../../volumes/persistent_imgcache_claim.yaml
   # Broadcaster
-  - ../../todo_broadcaster/manifests/00-nats.yml
-  - ../../todo_broadcaster/manifests/01-nats-service.yaml
-  - ../../todo_broadcaster/manifests/02-deployment.yaml
   # Backend
-  - ../../todo_backend/manifests/01-database.yaml
-  - ../../todo_backend/manifests/02-deployment.yaml
-  - ../../todo_backend/manifests/03-service.yaml
   # Use Gateway API instead of Ingress 
   #- ../../todo_backend/manifests/04-ingress.yaml
-  - ../../todo_backend/manifests/05-cron.yaml
   # Frontend
-  - ../../todo_app/manifests/deployment.yaml
-  - ../../todo_app/manifests/service.yaml
   # Use Gateway API instead of Ingress 
   #- ../../todo_app/manifests/ingress.yaml
-  - todo-app-gateway.yaml
-  - todo-app-route.yaml
+resources:
+- ../../manifests/namespace.yaml
+- ../../../volumes/persistent_imgcache_claim.yaml
+- ../../todo_broadcaster/manifests/00-nats.yml
+- ../../todo_broadcaster/manifests/01-nats-service.yaml
+- ../../todo_broadcaster/manifests/02-deployment.yaml
+- ../../todo_backend/manifests/01-database.yaml
+- ../../todo_backend/manifests/02-deployment.yaml
+- ../../todo_backend/manifests/03-service.yaml
+- ../../todo_backend/manifests/05-cron.yaml
+- ../../todo_app/manifests/deployment.yaml
+- ../../todo_app/manifests/service.yaml
+- todo-app-gateway.yaml
+- todo-app-route.yaml
 
 # Do required customization for GKE
 patches:
-  - path: patch-remove-db-storageclass.yaml
-    target:
-      kind: StatefulSet
-      name: postgres-stset
-  - path: patch-remove-img-storageclass.yaml
-    target:
-      kind: PersistentVolumeClaim
-      name: image-cache
-  - path: patch-add-db-subpath.yaml
-    target:
-      kind: StatefulSet
-      name: postgres-stset
-  - path: patch-add-img-subpath.yaml
-    target:
-      kind: Deployment
-      name: todo-app-deployment
-  - path: patch-change-service-port-to-80.yaml
-    target:
-      kind: Service
-      name: todo-app-svc
+- path: patch-remove-db-storageclass.yaml
+  target:
+    kind: StatefulSet
+    name: postgres-stset
+- path: patch-remove-img-storageclass.yaml
+  target:
+    kind: PersistentVolumeClaim
+    name: image-cache
+- path: patch-add-db-subpath.yaml
+  target:
+    kind: StatefulSet
+    name: postgres-stset
+- path: patch-add-img-subpath.yaml
+  target:
+    kind: Deployment
+    name: todo-app-deployment
+- path: patch-change-service-port-to-80.yaml
+  target:
+    kind: Service
+    name: todo-app-svc
+images:
+- name: '*/todo_app:*'
+  newName: europe-north1-docker.pkg.dev/dwk-gke-iku/dwk-artifact-repo/todo_app
+  newTag: 4.9-170f94f4b47d93d3d6a9fa9d0367cd204c7bf955
+- name: '*/todo_backend:*'
+  newName: europe-north1-docker.pkg.dev/dwk-gke-iku/dwk-artifact-repo/todo_backend
+  newTag: 4.9-170f94f4b47d93d3d6a9fa9d0367cd204c7bf955
+- name: '*/todo_broadcaster:*'
+  newName: europe-north1-docker.pkg.dev/dwk-gke-iku/dwk-artifact-repo/todo_broadcaster
+  newTag: 4.9-170f94f4b47d93d3d6a9fa9d0367cd204c7bf955
