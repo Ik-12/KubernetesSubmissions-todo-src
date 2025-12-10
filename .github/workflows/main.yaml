@@ -162,4 +162,4 @@ jobs:
           cwd: './configuration'
           add: './the_project/overlays/production/kustomization.yaml'
           tag: ${{ github.ref_name }}
-          message: New staging app version(s) released https://github.com/Ik-12/KubernetesSubmissions-todo-src/commit/${{ github.sha }} 
+          message: New production app version(s) released https://github.com/Ik-12/KubernetesSubmissions-todo-src/commit/${{ github.sha }} 
