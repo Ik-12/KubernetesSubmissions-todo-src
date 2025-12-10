@@ -13,3 +13,7 @@ The CI/CD pipeline is also separated between the repositories:
 
 - CI: the source repository contains the CI process that builds the docker images and pushes them to GCP Artifact repository. In addition, it uses kustomize to set image tags on the configuration repository, and pushes changes related to this to the config repository. This automatically trigges the CD process like any other change to the configuration repository.
 - CD: the configuration repository contains the CD process that deploys the project to GKE and updates the staging and production branches watched by Argo CD on the local cluster. The image tags are set in the_project/overlays/ kustomization files by the CI pipeline.
+
+## Secrets
+
+The source repository must have Github Personal Access Token configure as repository secret with the name `CONFIG_REPO_TOKEN`. The token must have permissions to push to the configuration repository.
