@@ -1,4 +1,4 @@
-name: Release the Project
+name: Project CI Pipeline
 
 on:
   push:
@@ -7,24 +7,8 @@ on:
     tags:
       - "*"
 
-  workflow_dispatch:
-    inputs:
-      force_ping_pong:
-        description: "Force build ping_pong"
-        required: false
-        default: 'false'
-      force_log_output:
-        description: "Force build log_output"
-        required: false
-        default: 'false'
-      force_the_project:
-        description: "Force build the project"
-        required: false
-        default: 'false'
-
 env:
   PROJECT_ID: ${{ secrets.GKE_PROJECT }}
-  GKE_CLUSTER: dwk-cluster
   GKE_ZONE: europe-north1-b
   REGISTRY: europe-north1-docker.pkg.dev
   REPOSITORY: dwk-artifact-repo
@@ -35,9 +19,9 @@ jobs:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
-      ping-pong: ${{ steps.filter.outputs.ping-pong }}
-      log-output: ${{ steps.filter.outputs.log-output }}
-      the-project: ${{ steps.filter.outputs.the-project }}
+      todo_app: ${{ steps.filter.outputs.todo_app }}
+      todo_backend: ${{ steps.filter.outputs.todo_backend }}
+      todo_broadcaster: ${{ steps.filter.outputs.todo_broadcaster }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,235 +31,16 @@ jobs:
         with:
           base: ${{ github.event.repository.default_branch }}
           filters: |
-            ping-pong:
-              - 'ping_pong/**'
-            log-output:
-              - 'log_output/**'
-            the-project:
-              - 'the_project/**'
-
-  build-publish-deploy-ping-pong:
-    name: Build, Publish and Deploy Ping Pong App
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ping-pong == 'true' || ${{ github.event.inputs.force_ping_pong != 'true' }}
-    environment: GKE
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - uses: google-github-actions/auth@v2
-        with:
-          credentials_json: "${{ secrets.GKE_SA_KEY }}"
-
-      - name: "Set up Cloud SDK"
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: "Use gcloud CLI"
-        run: gcloud info
-
-      - name: "Configure docker to use GKE registry"
-        run: gcloud --quiet auth configure-docker $REGISTRY
-
-      - name: Check if GKE cluster is running
-        id: check-cluster
-        run: |
-          CLUSTER_STATUS=$(gcloud container clusters describe $GKE_CLUSTER --zone $GKE_ZONE --format="value(status)" 2> /dev/null || echo "NOT_FOUND")
-          echo "CLUSTER_STATUS=$CLUSTER_STATUS" >> $GITHUB_ENV
-          if [ "$CLUSTER_STATUS" = "RUNNING" ]; then
-            echo "Cluster is running."
-          else
-            echo "Cluster is not running or does not exist."
-          fi
-
-      - name: "Get GKE credentials"
-        if: env.CLUSTER_STATUS == 'RUNNING'
-        uses: "google-github-actions/get-gke-credentials@v2"
-        with:
-          cluster_name: "${{ env.GKE_CLUSTER }}"
-          project_id: "${{ env.PROJECT_ID }}"
-          location: "${{ env.GKE_ZONE }}"
-
-      - name: "Form the image name"
-        run: echo "IMAGE_TAG=$REGISTRY/$PROJECT_ID/$REPOSITORY/ping_pong:$BRANCH-$GITHUB_SHA" >> $GITHUB_ENV
-
-      - name: Build and push the image
-        if: ${{ !env.ACT_SKIP_BUILD }}
-        uses: docker/build-push-action@v4
-        with:
-          context: ./ping_pong
-          push: true
-          tags: ${{ env.IMAGE_TAG }}
-
-      - name: Install kubectl CLI
-        uses: azure/setup-kubectl@v4
-        with:
-          version: "latest"
-
-      - name: Set up Kustomize
-        uses: imranismail/setup-kustomize@v2.1.0
-        with:
-          # Need to make local runner using act to work
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
-
-      - name: Update GKE kustomization.yaml with new image tag
-        working-directory: ping_pong/gke/manifests
-        run: |
-          kustomize edit set image \*/ping_pong:\*=$IMAGE_TAG
-
-      - name: Commit GKE kustomization.yaml to GitHub
-        uses: EndBug/add-and-commit@v9
-        with:
-          new_branch: main-gke-deploy
-          push: 'origin main-gke-deploy --set-upstream --force'
-          add: './ping_pong/gke/manifests/kustomization.yaml'
-          message: New version released ${{ github.sha }} to GKE
-
-      - name: Update Local cluster kustomization.yaml with new image tag
-        working-directory: ping_pong/manifests
-        run: |
-          kustomize edit set image \*/ping_pong:\*=$IMAGE_TAG
-
-      - name: Commit local kustomization.yaml to GitHub
-        uses: EndBug/add-and-commit@v9
-        with:
-          new_branch: main-local-deploy
-          push: 'origin main-local-deploy --set-upstream --force'
-          add: './ping_pong/manifests/kustomization.yaml'
-          message: New version released ${{ github.sha }} for local deployment
-
-      - name: Deploy to GKE if cluster is running
-        if: env.CLUSTER_STATUS == 'RUNNING'
-        working-directory: ping_pong/gke/manifests
-        run: |-
-          kubectl create namespace "exercises" || true
-          kubectl config set-context --current --namespace="exercises"
-
-          kustomize --load-restrictor LoadRestrictionsNone build . | kubectl apply -f -
-          kubectl get services -o wide
-
-  build-publish-deploy-log-output:
-    name: Build, Publish and Deploy Log Output App
-    needs: [detect-changes, build-publish-deploy-ping-pong]
-    if: needs.detect-changes.outputs.log-output == 'true' || ${{ github.event.inputs.force_log_output != 'true' }}
-    environment: GKE
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - uses: google-github-actions/auth@v2
-        with:
-          credentials_json: "${{ secrets.GKE_SA_KEY }}"
-
-      - name: "Set up Cloud SDK"
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: "Use gcloud CLI"
-        run: gcloud info
-
-      - name: "Configure docker to use GKE registry"
-        run: gcloud --quiet auth configure-docker $REGISTRY
-
-      - name: Check if GKE cluster is running
-        id: check-cluster
-        run: |
-          CLUSTER_STATUS=$(gcloud container clusters describe $GKE_CLUSTER --zone $GKE_ZONE --format="value(status)" 2> /dev/null || echo "NOT_FOUND")
-          echo "CLUSTER_STATUS=$CLUSTER_STATUS" >> $GITHUB_ENV
-          if [ "$CLUSTER_STATUS" = "RUNNING" ]; then
-            echo "Cluster is running."
-          else
-            echo "Cluster is not running or does not exist."
-          fi 
-
-      - name: "Get GKE credentials"
-        if: env.CLUSTER_STATUS == 'RUNNING'
-        uses: "google-github-actions/get-gke-credentials@v2"
-        with:
-          cluster_name: "${{ env.GKE_CLUSTER }}"
-          project_id: "${{ env.PROJECT_ID }}"
-          location: "${{ env.GKE_ZONE }}"
-
-      - name: "Form the Log Reader image name"
-        run: echo "READER_IMAGE_TAG=$REGISTRY/$PROJECT_ID/$REPOSITORY/log_output_reader_api:$BRANCH-$GITHUB_SHA" >> $GITHUB_ENV
-
-      - name: Build and push the Log Reader image
-        if: ${{ !env.ACT_SKIP_BUILD }}
-        uses: docker/build-push-action@v4
-        with:
-          context: ./log_output/log-reader-api
-          push: true
-          tags: ${{ env.READER_IMAGE_TAG }}
-      
-      - name: "Form the Log Writer image name"
-        run: echo "WRITER_IMAGE_TAG=$REGISTRY/$PROJECT_ID/$REPOSITORY/log_output_writer:$BRANCH-$GITHUB_SHA" >> $GITHUB_ENV
-
-      - name: Build and push the Log Reader image
-        if: ${{ !env.ACT_SKIP_BUILD }}
-        uses: docker/build-push-action@v4
-        with:
-          context: ./log_output/log-writer
-          push: true
-          tags: ${{ env.WRITER_IMAGE_TAG }}
-
-      - name: Install kubectl CLI
-        uses: azure/setup-kubectl@v4
-        with:
-          version: "latest"
-
-      - name: Set up Kustomize
-        uses: imranismail/setup-kustomize@v2.1.0
-        with:
-          # Need to make local runner using act to work
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
-
-      - name: Update GKE kustomization.yaml with new image tag
-        working-directory: log_output/gke/manifests
-        run: |
-          # Use the images we just build and pushed
-          kustomize edit set image \*/log_output_reader_api::\*=$READER_IMAGE_TAG
-          kustomize edit set image \*/log_output_writer:\*=$WRITER_IMAGE_TAG
-
-      - name: Commit GKE kustomization.yaml to GitHub
-        uses: EndBug/add-and-commit@v9
-        with:
-          new_branch: main-gke-deploy
-          push: 'origin main-gke-deploy --set-upstream --force'
-          add: './log_outpuT/gke/manifests/kustomization.yaml'
-          message: New version released ${{ github.sha }} to GKE
-
-
-      - name: Update Local cluster kustomization.yaml with new image tag
-        working-directory: log_output/manifests
-        run: |
-          kustomize edit set image \*/log_output_reader_api::\*=$READER_IMAGE_TAG
-          kustomize edit set image \*/log_output_writer:\*=$WRITER_IMAGE_TAG
-
-      - name: Commit local kustomization.yaml to GitHub
-        uses: EndBug/add-and-commit@v9
-        with:
-          new_branch: main-local-deploy
-          push: 'origin main-local-deploy --set-upstream --force'
-          add: './log_output/manifests/kustomization.yaml'
-          message: New version released ${{ github.sha }} for local deployment
-
-      - name: Deploy to GKE if cluster is running
-        if: env.CLUSTER_STATUS == 'RUNNING'
-        working-directory: log_output/gke/manifests
-        run: |-
-          # Set namespace based on branch name
-          kubectl create namespace "exercises" || true
-          kubectl config set-context --current --namespace="exercises"
-
-          kustomize --load-restrictor LoadRestrictionsNone build . | kubectl apply -f -
-          kubectl get services -o wide
+            todo_app:
+              - 'todo_app/**'
+            todo_backend:
+              - 'todo_backend/**'
+            todo_broadcaster:
+              - 'todo_broadcaster/**'
 
   build-publish-deploy-the-project:
-    name: Build, Publish and Deploy The Project
+    name: Build The Project
     needs: detect-changes
-    if: needs.detect-changes.outputs.the-project == 'true' || ${{ github.event.inputs.force_the_project != 'true' }} || github.ref_type == 'tag'
     environment: GKE
     runs-on: ubuntu-latest
 
@@ -312,36 +77,17 @@ jobs:
       - name: "Use gcloud CLI"
         run: gcloud info
 
-      - name: Check if GKE cluster is running
-        id: check-cluster
-        run: |
-          CLUSTER_STATUS=$(gcloud container clusters describe $GKE_CLUSTER --zone $GKE_ZONE --format="value(status)" 2> /dev/null || echo "NOT_FOUND")
-          echo "CLUSTER_STATUS=$CLUSTER_STATUS" >> $GITHUB_ENV
-          if [ "$CLUSTER_STATUS" = "RUNNING" ]; then
-            echo "Cluster is running."
-          else
-            echo "Cluster is not running or does not exist."
-          fi
-
       - name: "Configure docker to use GKE registry"
         run: gcloud --quiet auth configure-docker $REGISTRY
-
-      - name: "Get GKE credentials"
-        if: env.CLUSTER_STATUS == 'RUNNING'
-        uses: "google-github-actions/get-gke-credentials@v2"
-        with:
-          cluster_name: "${{ env.GKE_CLUSTER }}"
-          project_id: "${{ env.PROJECT_ID }}"
-          location: "${{ env.GKE_ZONE }}"
 
       - name: "Form the todo-app image name"
         run: echo "TODO_APP_IMAGE_TAG=$REGISTRY/$PROJECT_ID/$REPOSITORY/todo_app:$BRANCH-$GITHUB_SHA" >> $GITHUB_ENV
 
       - name: Build and push todo-app image
-        if: ${{ !env.ACT_SKIP_BUILD }}
+        if: needs.detect-changes.outputs.todo_app == 'true' || ${{ env.ACT_FORCE_BUILD }} == 'true'
         uses: docker/build-push-action@v4
         with:
-          context: ./the_project/todo_app
+          context: ./todo_app
           push: true
           tags: ${{ env.TODO_APP_IMAGE_TAG }}
 
@@ -349,10 +95,10 @@ jobs:
         run: echo "TODO_BACKEND_IMAGE_TAG=$REGISTRY/$PROJECT_ID/$REPOSITORY/todo_backend:$BRANCH-$GITHUB_SHA" >> $GITHUB_ENV
 
       - name: Build and push todo-backend image
-        if: ${{ !env.ACT_SKIP_BUILD }}
+        if: needs.detect-changes.outputs.todo_backend == 'true' || ${{ env.ACT_FORCE_BUILD }} == 'true'
         uses: docker/build-push-action@v4
         with:
-          context: ./the_project/todo_backend
+          context: ./todo_backend
           push: true
           tags: ${{ env.TODO_BACKEND_IMAGE_TAG }}
 
@@ -360,86 +106,60 @@ jobs:
         run: echo "TODO_BROADCASTER_IMAGE_TAG=$REGISTRY/$PROJECT_ID/$REPOSITORY/todo_broadcaster:$BRANCH-$GITHUB_SHA" >> $GITHUB_ENV
 
       - name: Build and push todo-broadcaster image
-        if: ${{ !env.ACT_SKIP_BUILD }}
+        if: needs.detect-changes.outputs.todo_broadcaster == 'true' || ${{ env.ACT_FORCE_BUILD }} == 'true'
         uses: docker/build-push-action@v4
         with:
-          context: ./the_project/todo_broadcaster
+          context: ./todo_broadcaster
           push: true
           tags: ${{ env.TODO_BROADCASTER_IMAGE_TAG }}
+
+      - name: Checkout the config repo to ./configuration
+        uses: actions/checkout@v4
+        with:
+          repository: Ik-12/KubernetesSubmissions
+          path: configuration
+          token: ${{ secrets.CONFIG_REPO_TOKEN }}
 
       - name: Install kubectl CLI
         uses: azure/setup-kubectl@v4
         with:
           version: "latest"
-
+      
       - name: Set up Kustomize
         uses: imranismail/setup-kustomize@v2.1.0
         with:
           # Need to make local runner using act to work
           github-token: "${{ secrets.GITHUB_TOKEN }}"
-
-      - name: Update GKE kustomization.yaml with new image tag
-        working-directory: the_project/gke/manifests
+     
+      - name: Update staging with new image tag
+        working-directory: configuration/the_project/overlays/staging
         run: |
           # Use the images we just build and pushed
           kustomize edit set image \*/todo_app:\*=$TODO_APP_IMAGE_TAG
           kustomize edit set image \*/todo_backend:\*=$TODO_BACKEND_IMAGE_TAG
           kustomize edit set image \*/todo_broadcaster:\*=$TODO_BROADCASTER_IMAGE_TAG
 
-      - name: Commit GKE kustomization.yaml to GitHub
+      - name: Commit staging kustomization.yaml to the config repo
         uses: EndBug/add-and-commit@v9
         with:
-          new_branch: main-gke-deploy
-          push: 'origin main-gke-deploy --set-upstream --force'
-          add: './the_project/gke/manifests/kustomization.yaml'
-          message: New version released ${{ github.sha }} to GKE
+          cwd: './configuration'
+          add: './the_project/overlays/staging/kustomization.yaml'
+          message: New staging app version(s) released https://github.com/Ik-12/KubernetesSubmissions-todo-src/commit/${{ github.sha }} 
 
-      - name: Update Local cluster kustomization.yaml for staging with new image tag
-        working-directory: the_project/manifests/
+      - name: Update production with new image tag if tagged commit
+        if: steps.checktag.outputs.is_tagged == 'true' || github.ref_type == 'tag'
+        working-directory: configuration/the_project/overlays/production
         run: |
           # Use the images we just build and pushed
           kustomize edit set image \*/todo_app:\*=$TODO_APP_IMAGE_TAG
           kustomize edit set image \*/todo_backend:\*=$TODO_BACKEND_IMAGE_TAG
           kustomize edit set image \*/todo_broadcaster:\*=$TODO_BROADCASTER_IMAGE_TAG
 
-      - name: Commit local kustomization.yaml to GitHub
-        uses: EndBug/add-and-commit@v9
-        with:
-          new_branch: master-local-staging
-          push: 'origin master-local-staging --set-upstream --force'
-          add: './the_project/manifests/kustomization.yaml'
-          message: New version released ${{ github.sha }} for local deployment to staging
-
-      - name: Deploy to production if a tagged commit
-        if: steps.checktag.outputs.is_tagged == 'true' || github.ref_type == 'tag'
-        working-directory: the_project/
-        run: |
-          date > production.txt
-
-      - name: Deploy to production if a tagged commit
+      - name: Commit production kustomization.yaml to the config repo
         if: steps.checktag.outputs.is_tagged == 'true' || github.ref_type == 'tag'
         uses: EndBug/add-and-commit@v9
         with:
-          new_branch: master-local-production
-          push: 'origin master-local-production --set-upstream --force'
-          add: './the_project/production.txt'
-          message: New version released ${{ github.sha }} for local deployment to production
-
-      - name: Deploy to GKE if cluster is running
-        if: env.CLUSTER_STATUS == 'RUNNING'
-        working-directory: the_project/gke/manifests
-        run: |-
-          # Set namespace based on branch name
-          echo "Deploying to namespace ${{ env.NAMESPACE }}"
-          kubectl create namespace ${{ env.NAMESPACE }} || true
-          kubectl config set-context --current --namespace=${{ env.NAMESPACE }}
-          kustomize edit set namespace ${{ env.NAMESPACE }}
-
-          # Create secrets
-          kubectl delete secret pg-password || true
-          kubectl create secret generic pg-password --from-literal=POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-          kubectl delete secret broadcaster-secret || true
-          kubectl create secret generic broadcaster-secret --from-literal=APPRISE_URL=${{ secrets.APPRISE_URL }}
-
-          kustomize --load-restrictor LoadRestrictionsNone build . | kubectl apply -f -
-          kubectl get services -o wide
+          cwd: './configuration'
+          add: './the_project/overlays/production/kustomization.yaml'
+          tag: ${{ github.ref_name }}
+          message: New staging app version(s) released https://github.com/Ik-12/KubernetesSubmissions-todo-src/commit/${{ github.sha }} 
