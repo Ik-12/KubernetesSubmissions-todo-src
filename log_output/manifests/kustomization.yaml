@@ -1,9 +1,16 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../../volumes/persistent_log_claim.yaml
-  - 01-env-config.yaml
-  - 02-infofile-config.yaml
-  - 03-deployment.yaml
-  - 04-service.yaml
-  - 05-ingress.yaml
+- ../../volumes/persistent_log_claim.yaml
+- 01-env-config.yaml
+- 02-infofile-config.yaml
+- 03-deployment.yaml
+- 04-service.yaml
+- 05-ingress.yaml
+images:
+- name: '*/log_output_reader_api::*'
+  newName: europe-north1-docker.pkg.dev/dwk-gke-iku/dwk-artifact-repo/log_output_reader_api
+  newTag: master-a9865c27317fc8c62e5dbb4750333b2565041b35
+- name: '*/log_output_writer:*'
+  newName: europe-north1-docker.pkg.dev/dwk-gke-iku/dwk-artifact-repo/log_output_writer
+  newTag: master-a9865c27317fc8c62e5dbb4750333b2565041b35
